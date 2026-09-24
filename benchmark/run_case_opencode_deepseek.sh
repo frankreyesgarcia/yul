@@ -195,6 +195,12 @@ if [ -f "$HOME/.local/share/opencode/auth.json" ]; then
   cp "$HOME/.local/share/opencode/auth.json" "$CONTAINER_HOME/.local/share/opencode/auth.json"
 fi
 
+# --thinking makes OpenCode's --format json stream emit {"type":"reasoning",
+# "part":{...,"text":...}} events, same as it already does for "text" - by
+# default that part type is only tracked internally as a tokens.reasoning
+# count (step-finish), the actual content is dropped before it reaches the
+# JSON stream. Without this flag, transcript.jsonl has no way to show what
+# the model actually reasoned through before writing a manifest.
 apptainer exec \
   --containall \
   --no-mount bind-paths \
@@ -212,6 +218,7 @@ apptainer exec \
   --model "$MODEL_ID" \
   --auto \
   --format json \
+  --thinking \
   > "$TRANSCRIPT_TMP" 2> "$STDERR_TMP" || true
 
 # Belt-and-suspenders: the yul-bash.js plugin above blocks reads of the
