@@ -166,6 +166,20 @@ STDERR_TMP=$(mktemp)
 # found by review - a model literally `cat ../run-1/pom.xml`'d another
 # repetition's already-corrected manifest instead of doing the task).
 #
+# --containall --no-mount bind-paths are load-bearing, not decorative: this
+# cluster's system-wide apptainer.conf has `bind path = /proj`, which
+# Apptainer auto-mounts into every container at the same absolute path
+# regardless of the explicit --bind list below - without opting out, the
+# model could still `cat /proj/.../run-1/pom.xml` and see a sibling rep,
+# same bug as before just via an absolute path instead of a relative one.
+# Verified empirically: /proj is unreachable inside the container with
+# these two flags, present without them.
+#
+# --containall's minimal /etc also drops the host's /etc/resolv.conf, which
+# breaks DNS for the actual DeepSeek API call - bound back in explicitly
+# below (read-only) since it doesn't reintroduce any of the /proj exposure
+# the two flags above are closing.
+#
 # Cache dirs: yul's release binary and the opencode-yul plugin package are
 # shared read-write across all containers (safe to race on - worst case is
 # a redundant re-download, no per-run data in either). Everything under
@@ -182,8 +196,11 @@ if [ -f "$HOME/.local/share/opencode/auth.json" ]; then
 fi
 
 apptainer exec \
+  --containall \
+  --no-mount bind-paths \
   --home "$CONTAINER_HOME:/home/sandbox" \
   --bind "$WORKDIR:/work" \
+  --bind /etc/resolv.conf:/etc/resolv.conf:ro \
   --bind "$SHARED_CACHE/yul:/home/sandbox/.cache/yul" \
   --bind "$SHARED_CACHE/opencode-pkg:/home/sandbox/.cache/opencode" \
   --bind "$(command -v "$OPENCODE_BIN"):/usr/local/bin/opencode:ro" \
