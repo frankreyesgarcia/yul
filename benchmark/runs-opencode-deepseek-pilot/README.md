@@ -18,7 +18,12 @@ Four files come out of each run (`benchmark/run_case_opencode_deepseek.sh`):
 
 - `transcript.jsonl` — full turn-by-turn record (every message, tool call, and tool result,
   including any `yul` block), one JSON object per line. Doesn't record which model/provider served
-  the request (see `model_used.log`).
+  the request (see `model_used.log`), and doesn't include the model's actual reasoning/thinking
+  content either — only `.part.type` values `step-start`, `step-finish`, `text`, and `tool` ever
+  appear. DeepSeek's reasoner models do return a separate `reasoning_content` field from the API,
+  but OpenCode's `run --format json` output doesn't forward it as a printable part; the only trace
+  of it left is a plain token count, `step-finish`'s `.part.tokens.reasoning` (e.g. `52`) — billing
+  accounting, not the content itself.
 - `final_manifest` — a copy of whatever manifest file (`pom.xml`, `requirements.txt`, etc.) exists
   on disk once OpenCode finishes.
 - `usage.json` — per-run token counts and **real dollar cost**, aggregated from the transcript's
