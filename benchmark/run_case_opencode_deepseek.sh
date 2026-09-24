@@ -257,6 +257,24 @@ if [ -n "$SESSION_ID" ] && [ -f "$OPENCODE_LOG" ]; then
 else
   : > model_used.log
 fi
+
+# Full session export, straight from this run's own throwaway OpenCode data
+# dir - unlike transcript.jsonl (the printer's --format json stream, which
+# --thinking only partially widens), the session storage on disk is
+# OpenCode's own source of truth and already holds every part type
+# untouched, reasoning included. $CONTAINER_HOME only ever held this run's
+# data in the first place (see the apptainer exec block above), so no
+# sessionID filtering is needed here the way it is for model_used.log -
+# there's nothing else in it to filter out. Run directly on the host
+# (no apptainer needed): this just reads local files already produced by
+# the finished container run, no model-directed code executes here.
+SESSION_EXPORT_TMP=$(mktemp)
+if [ -n "$SESSION_ID" ]; then
+  HOME="$CONTAINER_HOME" "$OPENCODE_BIN" export "$SESSION_ID" > "$SESSION_EXPORT_TMP" 2>/dev/null || true
+fi
+sed -i -E 's/sk-[a-f0-9]{32}/***REDACTED-DEEPSEEK-API-KEY***/g' "$SESSION_EXPORT_TMP"
+mv "$SESSION_EXPORT_TMP" session_export.json
+
 rm -rf "$CONTAINER_HOME"
 
 # When .manifest listed several candidate paths, use whichever one the
