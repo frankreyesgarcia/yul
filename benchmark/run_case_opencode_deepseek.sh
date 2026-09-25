@@ -283,6 +283,14 @@ fi
 sed -i -E 's/sk-[a-f0-9]{32}/***REDACTED-DEEPSEEK-API-KEY***/g' "$SESSION_EXPORT_TMP"
 mv "$SESSION_EXPORT_TMP" session_export.json
 
+# Go's module cache (under $CONTAINER_HOME/go/pkg/mod for a go.mod case)
+# marks downloaded module directories read-only by design - go clean
+# -modcache is the only sanctioned way to remove it because of exactly
+# this, plain rm -rf fails partway through with "Permission denied" on a
+# read-only dir under set -e, silently killing the script right after
+# session_export.json but before final_manifest ever got written. Caught
+# live: every go-top-06-x-net rep in a pilot batch failed this way.
+chmod -R u+w "$CONTAINER_HOME" 2>/dev/null || true
 rm -rf "$CONTAINER_HOME"
 
 # When .manifest listed several candidate paths, use whichever one the
