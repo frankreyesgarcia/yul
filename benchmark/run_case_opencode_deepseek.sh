@@ -23,7 +23,8 @@
 #   run_case_opencode_deepseek.sh <cases.json> <case_id> <hook|nohook> <output_dir> [model_id] [repeat_index]
 #
 #   model_id      opencode model spec provider/model (default:
-#                 deepseek/deepseek-v4-flash).
+#                 deepseek/deepseek-flash - `opencode models deepseek` is the
+#                 source of truth here, the catalog has renamed this before).
 #   repeat_index  if set, run output goes to <condition>/run-<repeat_index>/
 #                 instead of directly under <condition>/ - use for repeated
 #                 runs of the same case/condition.
@@ -38,7 +39,7 @@ CASES_JSON="$1"
 CASE_ID="$2"
 CONDITION="$3"   # hook | nohook
 OUT_DIR="$4"
-MODEL_ID="${5:-deepseek/deepseek-v4-flash}"
+MODEL_ID="${5:-deepseek/deepseek-flash}"
 REPEAT_INDEX="${6:-}"
 
 YUL_BIN="${YUL_BIN:-yul}"
@@ -251,7 +252,14 @@ jq -s '
 # its own throwaway container $HOME now, so this log is already isolated
 # to this run alone - the sessionID filter is just extra safety.
 OPENCODE_LOG="$CONTAINER_HOME/.local/share/opencode/log/opencode.log"
-SESSION_ID=$(jq -r 'select(.sessionID != null) | .sessionID' transcript.jsonl 2>/dev/null | head -1)
+# `jq ... | head -1` (the previous form here) is a `set -o pipefail` trap:
+# head can close its end of the pipe right after reading one line, jq gets
+# SIGPIPE, and pipefail turns that into a nonzero exit that kills the whole
+# script under `set -e` - intermittently, depending on timing, which is
+# exactly what silently dropped ~1/3 of a live pilot run's model_used.log/
+# session_export.json/final_manifest before this got caught. jq's own
+# `first(inputs | ...)` stays inside one process, so there's no pipe to race.
+SESSION_ID=$(jq -rn 'first(inputs | select(.sessionID != null) | .sessionID) // empty' transcript.jsonl 2>/dev/null)
 if [ -n "$SESSION_ID" ] && [ -f "$OPENCODE_LOG" ]; then
   grep -F "session.id=$SESSION_ID" "$OPENCODE_LOG" | grep -E "providerID=|llm\.provider=" > model_used.log || true
 else
