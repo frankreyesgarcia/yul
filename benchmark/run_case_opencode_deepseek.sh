@@ -74,6 +74,15 @@ WORKDIR="$OUT_DIR/$CASE_ID/$CONDITION"
 if [ -n "$REPEAT_INDEX" ]; then
   WORKDIR="$WORKDIR/run-$REPEAT_INDEX"
 fi
+# Same read-only-directory trap as $CONTAINER_HOME's cleanup below, but for
+# WORKDIR itself: a crashed or interrupted prior attempt (e.g. the
+# apptainer SIGABRT seen live during the pilot) can leave a partially
+# populated Go module cache under here (a case's toolchain download dir
+# lives inside WORKDIR, not just CONTAINER_HOME), and rm -rf chokes on its
+# read-only module directories every single retry, since the leftover
+# never actually gets removed. chmod first so retries can't get stuck on
+# their own prior failure.
+chmod -R u+w "$WORKDIR" 2>/dev/null || true
 rm -rf "$WORKDIR"
 mkdir -p "$WORKDIR/.opencode/plugins"
 
