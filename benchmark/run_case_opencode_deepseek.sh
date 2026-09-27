@@ -4,13 +4,16 @@
 # "deepseek" provider (models.dev catalog) instead of a self-hosted,
 # OpenAI-compatible endpoint - no custom provider config needed.
 #
-# The actual `opencode run` happens inside a fresh Apptainer container per
-# invocation (see opencode-sandbox.def/.sif) with only this run's own
-# WORKDIR bind-mounted - a model's bash/read tools can't see sibling runs'
-# directories at all, unlike the un-sandboxed version, where a run was
-# caught `cat`-ing a completed sibling repetition's manifest instead of
-# doing the task itself. Build the image once with:
+# The actual `opencode run` happens inside a fresh container per invocation
+# (only this run's own WORKDIR bind-mounted) - a model's bash/read tools
+# can't see sibling runs' directories at all, unlike the un-sandboxed
+# version, where a run was caught `cat`-ing a completed sibling
+# repetition's manifest instead of doing the task itself.
+#
+# Runtime is auto-detected (apptainer preferred, docker as fallback) or
+# forced via CONTAINER_RUNTIME=apptainer|docker. Build the image once:
 #   apptainer build benchmark/opencode-sandbox.sif benchmark/opencode-sandbox.def
+#   docker build -t yul-opencode-sandbox -f benchmark/Dockerfile.opencode-sandbox benchmark/
 #
 # Credentials come from OpenCode's own store (`opencode auth login`, saved
 # to ~/.local/share/opencode/auth.json), not an env var - this script never
@@ -30,9 +33,12 @@
 #                 runs of the same case/condition.
 #
 # Env vars:
-#   YUL_BIN       path to the yul binary the hook condition execs
-#                 (default: "yul" on PATH; build one with `go build -o yul .`)
-#   OPENCODE_BIN  path to the opencode binary (default: "opencode" on PATH)
+#   YUL_BIN            path to the yul binary the hook condition execs
+#                       (default: "yul" on PATH; build one with `go build -o yul .`)
+#   OPENCODE_BIN        path to the opencode binary (default: "opencode" on PATH)
+#   CONTAINER_RUNTIME   "apptainer" or "docker" - forces which one to use
+#                       instead of auto-detecting (apptainer preferred when
+#                       both are on PATH, since that's what the cluster runs)
 set -euo pipefail
 
 CASES_JSON="$1"
@@ -45,12 +51,44 @@ REPEAT_INDEX="${6:-}"
 YUL_BIN="${YUL_BIN:-yul}"
 OPENCODE_BIN="${OPENCODE_BIN:-opencode}"
 command -v "$OPENCODE_BIN" >/dev/null 2>&1 || { echo "opencode not found (set OPENCODE_BIN or put it on PATH)" >&2; exit 1; }
-command -v apptainer >/dev/null 2>&1 || { echo "apptainer not found on PATH" >&2; exit 1; }
 if [ "$CONDITION" = "hook" ]; then
   command -v "$YUL_BIN" >/dev/null 2>&1 || { echo "yul not found (set YUL_BIN or put it on PATH)" >&2; exit 1; }
 fi
-SIF_IMAGE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/opencode-sandbox.sif"
-[ -f "$SIF_IMAGE" ] || { echo "$SIF_IMAGE not found - build it with: apptainer build $SIF_IMAGE $(dirname "$SIF_IMAGE")/opencode-sandbox.def" >&2; exit 1; }
+
+BENCH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RUNTIME="${CONTAINER_RUNTIME:-}"
+if [ -z "$RUNTIME" ]; then
+  if command -v apptainer >/dev/null 2>&1; then
+    RUNTIME="apptainer"
+  elif command -v docker >/dev/null 2>&1; then
+    RUNTIME="docker"
+  else
+    echo "neither apptainer nor docker found on PATH (set CONTAINER_RUNTIME to force one)" >&2
+    exit 1
+  fi
+fi
+
+case "$RUNTIME" in
+  apptainer)
+    command -v apptainer >/dev/null 2>&1 || { echo "apptainer not found on PATH" >&2; exit 1; }
+    SIF_IMAGE="$BENCH_DIR/opencode-sandbox.sif"
+    [ -f "$SIF_IMAGE" ] || { echo "$SIF_IMAGE not found - build it with: apptainer build $SIF_IMAGE $BENCH_DIR/opencode-sandbox.def" >&2; exit 1; }
+    ;;
+  docker)
+    command -v docker >/dev/null 2>&1 || { echo "docker not found on PATH" >&2; exit 1; }
+    DOCKER_IMAGE="${DOCKER_IMAGE:-yul-opencode-sandbox}"
+    # `docker image inspect` (not `docker images -q`) reports "No such
+    # image" for a name that `docker run`/`docker images` resolves fine -
+    # seen live on Docker Desktop's containerd image store, where a build
+    # with provenance/SBOM attestations produces a manifest list `inspect`
+    # doesn't resolve by name the same way `images`/`run` do.
+    [ -n "$(docker images -q "$DOCKER_IMAGE" 2>/dev/null)" ] || { echo "docker image '$DOCKER_IMAGE' not found - build it with: docker build -t $DOCKER_IMAGE -f $BENCH_DIR/Dockerfile.opencode-sandbox $BENCH_DIR" >&2; exit 1; }
+    ;;
+  *)
+    echo "unknown CONTAINER_RUNTIME '$RUNTIME' (expected apptainer or docker)" >&2
+    exit 1
+    ;;
+esac
 
 case_json() {
   jq -c --arg id "$CASE_ID" '.[] | select(.id == $id)' "$CASES_JSON"
@@ -159,11 +197,14 @@ git config user.name "benchmark"
 TRANSCRIPT_TMP=$(mktemp)
 STDERR_TMP=$(mktemp)
 
-# Runs under Apptainer, one fresh container per run: --no-home plus binding
-# only this run's own WORKDIR means the model's bash/read tools can't see
-# sibling runs' directories at all (a real cross-run contamination bug
-# found by review - a model literally `cat ../run-1/pom.xml`'d another
-# repetition's already-corrected manifest instead of doing the task).
+# One fresh container per run (apptainer or docker, see RUNTIME above):
+# binding only this run's own WORKDIR means the model's bash/read tools
+# can't see sibling runs' directories at all (a real cross-run
+# contamination bug found by review - a model literally
+# `cat ../run-1/pom.xml`'d another repetition's already-corrected
+# manifest instead of doing the task). The apptainer-specific rationale
+# below (--containall/--no-mount bind-paths/resolv.conf) doesn't apply to
+# the docker branch - see the comment there instead.
 #
 # --containall --no-mount bind-paths are load-bearing, not decorative: this
 # cluster's system-wide apptainer.conf has `bind path = /proj`, which
@@ -200,25 +241,68 @@ fi
 # count (step-finish), the actual content is dropped before it reaches the
 # JSON stream. Without this flag, transcript.jsonl has no way to show what
 # the model actually reasoned through before writing a manifest.
-apptainer exec \
-  --containall \
-  --no-mount bind-paths \
-  --home "$CONTAINER_HOME:/home/sandbox" \
-  --bind "$WORKDIR:/work" \
-  --bind /etc/resolv.conf:/etc/resolv.conf:ro \
-  --bind "$SHARED_CACHE/yul:/home/sandbox/.cache/yul" \
-  --bind "$SHARED_CACHE/opencode-pkg:/home/sandbox/.cache/opencode" \
-  --bind "$(command -v "$OPENCODE_BIN"):/usr/local/bin/opencode:ro" \
-  --bind "$(command -v "$YUL_BIN"):/usr/local/bin/yul:ro" \
-  --env YUL_BIN=/usr/local/bin/yul \
-  --pwd /work \
-  "$SIF_IMAGE" \
-  opencode run "$PROMPT" \
-  --model "$MODEL_ID" \
-  --auto \
-  --format json \
-  --thinking \
-  > "$TRANSCRIPT_TMP" 2> "$STDERR_TMP" || true
+if [ "$RUNTIME" = "apptainer" ]; then
+  apptainer exec \
+    --containall \
+    --no-mount bind-paths \
+    --home "$CONTAINER_HOME:/home/sandbox" \
+    --bind "$WORKDIR:/work" \
+    --bind /etc/resolv.conf:/etc/resolv.conf:ro \
+    --bind "$SHARED_CACHE/yul:/home/sandbox/.cache/yul" \
+    --bind "$SHARED_CACHE/opencode-pkg:/home/sandbox/.cache/opencode" \
+    --bind "$(command -v "$OPENCODE_BIN"):/usr/local/bin/opencode:ro" \
+    --bind "$(command -v "$YUL_BIN"):/usr/local/bin/yul:ro" \
+    --env YUL_BIN=/usr/local/bin/yul \
+    --pwd /work \
+    "$SIF_IMAGE" \
+    opencode run "$PROMPT" \
+    --model "$MODEL_ID" \
+    --auto \
+    --format json \
+    --thinking \
+    > "$TRANSCRIPT_TMP" 2> "$STDERR_TMP" || true
+else
+  # Docker equivalent of the apptainer block above. --containall/--no-mount
+  # bind-paths have no docker counterpart because they exist only to opt
+  # out of a *cluster-wide* apptainer.conf auto-mount (`bind path = /proj`)
+  # that doesn't apply here - docker never shares host paths unless you
+  # pass -v, so there's nothing implicit to close off. Same reasoning for
+  # dropping the /etc/resolv.conf bind: docker's own embedded DNS (the
+  # bridge network's 127.0.0.11 resolver) already forwards to the host
+  # correctly without it.
+  #
+  # --user "$(id -u):$(id -g)" mirrors apptainer's default (run as the
+  # invoking host user, not root) - without it, docker runs as root and
+  # everything written under the /work bind mount (the manifest files
+  # run_case_opencode_deepseek.sh reads back afterward) ends up
+  # root-owned on the host, which breaks the chmod/rm -rf cleanup on the
+  # *next* run of this same case under an unprivileged user.
+  #
+  # opencode is NOT bind-mounted here (unlike the apptainer branch) - see
+  # the Dockerfile.opencode-sandbox comment: it's baked into the image at
+  # build time instead, since bind-mounting the host's own binary fails
+  # with "exec format error" whenever the host isn't Linux/same-arch as
+  # the image (verified live on macOS). $YUL_BIN is still bound in, but
+  # nothing inside the container execs it (see the comment above the
+  # apptainer bind for the same path), so it's harmless either way.
+  docker run --rm \
+    --user "$(id -u):$(id -g)" \
+    -e HOME=/home/sandbox \
+    -e YUL_BIN=/usr/local/bin/yul \
+    -v "$CONTAINER_HOME:/home/sandbox" \
+    -v "$WORKDIR:/work" \
+    -v "$SHARED_CACHE/yul:/home/sandbox/.cache/yul" \
+    -v "$SHARED_CACHE/opencode-pkg:/home/sandbox/.cache/opencode" \
+    -v "$(command -v "$YUL_BIN"):/usr/local/bin/yul:ro" \
+    -w /work \
+    "$DOCKER_IMAGE" \
+    opencode run "$PROMPT" \
+    --model "$MODEL_ID" \
+    --auto \
+    --format json \
+    --thinking \
+    > "$TRANSCRIPT_TMP" 2> "$STDERR_TMP" || true
+fi
 
 # Belt-and-suspenders: the yul-auth-guard.js plugin above blocks reads of
 # the auth store, but redact anything DeepSeek-key-shaped that slips through
@@ -269,10 +353,10 @@ fi
 # --thinking only partially widens), the session storage on disk is
 # OpenCode's own source of truth and already holds every part type
 # untouched, reasoning included. $CONTAINER_HOME only ever held this run's
-# data in the first place (see the apptainer exec block above), so no
-# sessionID filtering is needed here the way it is for model_used.log -
-# there's nothing else in it to filter out. Run directly on the host
-# (no apptainer needed): this just reads local files already produced by
+# data in the first place (see the apptainer/docker exec block above), so
+# no sessionID filtering is needed here the way it is for model_used.log -
+# there's nothing else in it to filter out. Run directly on the host (no
+# container needed): this just reads local files already produced by
 # the finished container run, no model-directed code executes here.
 SESSION_EXPORT_TMP=$(mktemp)
 if [ -n "$SESSION_ID" ]; then

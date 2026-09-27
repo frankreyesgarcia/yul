@@ -23,7 +23,13 @@
 #     so results are never accidentally attributed to a different harness
 #     version)
 #   - go build -o yul . run once at the repo root
-#   - apptainer build benchmark/opencode-sandbox.sif benchmark/opencode-sandbox.def
+#   - a container runtime image, either:
+#       apptainer build benchmark/opencode-sandbox.sif benchmark/opencode-sandbox.def
+#     or
+#       docker build -t yul-opencode-sandbox -f benchmark/Dockerfile.opencode-sandbox benchmark/
+#     run_case_opencode_deepseek.sh auto-detects which one is on PATH
+#     (apptainer preferred if both are); force one with
+#     CONTAINER_RUNTIME=apptainer|docker.
 #   - opencode auth login -p deepseek (interactively, on the host - this
 #     script and run_case_opencode_deepseek.sh never read or hold the key)
 set -uo pipefail

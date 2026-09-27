@@ -18,3 +18,8 @@ From: debian:bookworm-slim
     benchmark/run_case_opencode_deepseek.sh), not baked into the image,
     so the harness always uses whatever's currently built/installed on
     the host without rebuilding the image.
+
+    Docker equivalent (for hosts without Apptainer): see
+    benchmark/Dockerfile.opencode-sandbox - keep both package lists in
+    sync. run_case_opencode_deepseek.sh auto-detects which runtime is on
+    PATH (or set CONTAINER_RUNTIME=apptainer|docker to force one).

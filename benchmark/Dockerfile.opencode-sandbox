@@ -1,0 +1,37 @@
+# Docker equivalent of opencode-sandbox.def, for hosts without Apptainer
+# (see the CONTAINER_RUNTIME auto-detection in run_case_opencode_deepseek.sh).
+# Keep the installed package list in sync with opencode-sandbox.def.
+#
+# Build with:
+#   docker build -t yul-opencode-sandbox -f benchmark/Dockerfile.opencode-sandbox benchmark/
+#
+# Unlike the Apptainer path, `opencode` is installed HERE at build time,
+# not bind-mounted from the host at run time. Apptainer containers share
+# the host's kernel/arch (the cluster only ever runs Linux, same as the
+# image), so binding the host's own opencode binary in just works. Docker
+# has no such guarantee - on a non-Linux host (tested live on macOS) or a
+# different-arch Linux host, `docker run` bind-mounting the host binary
+# in fails immediately with "exec format error", since it's a
+# different-OS/arch executable running under a container built for a
+# different one. Baking it in means the image must be rebuilt to pick up
+# a newer opencode release (the tradeoff apptainer avoids), but it's the
+# only way this actually runs on an arbitrary Docker host.
+#
+# `yul` is still bind-mounted at run time (see run_case_opencode_deepseek.sh)
+# even on the docker path - harmless even if it's cross-arch, since nothing
+# inside the container ever execs it directly (the opencode-yul plugin
+# downloads its own pinned release binary instead, see the comment above
+# that bind in run_case_opencode_deepseek.sh).
+FROM debian:bookworm-slim
+
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        ca-certificates curl git jq \
+        nodejs npm \
+        python3 python3-pip python3-venv && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL https://opencode.ai/install | bash && \
+    mv "$HOME/.opencode/bin/opencode" /usr/local/bin/opencode && \
+    chmod 755 /usr/local/bin/opencode
