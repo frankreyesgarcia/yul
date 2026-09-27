@@ -113,18 +113,15 @@ EOF
 fi
 
 if [ "$CONDITION" = "hook" ]; then
-  # opencode-yul (above) only covers write/edit as of its current release -
-  # it has no Bash case, so this local plugin fills that one gap plus our
-  # own auth-store-read block (neither is upstream yet). Talks to $YUL_BIN
-  # (our locally built binary), not opencode-yul's separately pinned one.
-  cat > "$WORKDIR/.opencode/plugins/yul-bash.js" <<'EOF'
-// Blocks two things opencode-yul's published plugin doesn't cover yet:
-// 1. Bash writes to a dependency manifest (main.go's runHook handles
-//    tool_name "Bash" itself; opencode-yul's toHookInput() only maps
-//    write/edit, so this delegates bash the same way write/edit already
-//    delegate to yul - see run_case_opencode.sh for the fuller original).
-// 2. Reading OpenCode's own credential store, wherever the DeepSeek API
-//    key lives (auth login, not an env var - see the top of this script).
+  # opencode-yul (above) is now the published npm package, v0.0.17 - it
+  # covers Write, Edit, and Bash natively (PR #60), with the narrower
+  # write-target-aware bash regex (PR #65) - so this local plugin no longer
+  # needs to duplicate any of that. All it still adds is the auth-store-read
+  # block, which isn't upstream anywhere yet: the run's DeepSeek API key
+  # lives in OpenCode's own credential store (auth login, not an env var -
+  # see the top of this script), so this is the one exfiltration path a
+  # model could still go looking for.
+  cat > "$WORKDIR/.opencode/plugins/yul-auth-guard.js" <<'EOF'
 const AUTH_STORE_RE = /\.local[/\\]share[/\\]opencode[/\\]auth\.json|opencode[/\\]auth\.json/i
 
 function mentionsAuthStore(args) {
@@ -134,20 +131,12 @@ function mentionsAuthStore(args) {
   return false
 }
 
-export const YulBashPlugin = async () => {
-  const YUL_BIN = process.env.YUL_BIN || "yul"
+export const YulAuthGuardPlugin = async () => {
   return {
-    "tool.execute.before": async (input, output) => {
-      const a = output.args
-      if (mentionsAuthStore(a)) {
+    "tool.execute.before": async (_input, output) => {
+      if (mentionsAuthStore(output.args)) {
         throw new Error("yul: reading OpenCode's credential store is not permitted")
       }
-      if (input.tool !== "bash") return
-      const proc = Bun.spawn([YUL_BIN], { stdin: "pipe", stdout: "pipe", stderr: "pipe" })
-      proc.stdin.write(JSON.stringify({ tool_name: "Bash", tool_input: { command: a.command || "" } }))
-      proc.stdin.end()
-      const [code, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()])
-      if (code === 2) throw new Error(stderr.trim() || "yul: blocked outdated dependency")
     },
   }
 }
@@ -231,8 +220,8 @@ apptainer exec \
   --thinking \
   > "$TRANSCRIPT_TMP" 2> "$STDERR_TMP" || true
 
-# Belt-and-suspenders: the yul-bash.js plugin above blocks reads of the
-# auth store, but redact anything DeepSeek-key-shaped that slips through
+# Belt-and-suspenders: the yul-auth-guard.js plugin above blocks reads of
+# the auth store, but redact anything DeepSeek-key-shaped that slips through
 # anyway (format is public: "sk-" + 32 hex chars) - this doesn't require
 # knowing the actual configured key, so it still works after rotation.
 sed -i -E 's/sk-[a-f0-9]{32}/***REDACTED-DEEPSEEK-API-KEY***/g' "$TRANSCRIPT_TMP" "$STDERR_TMP"
