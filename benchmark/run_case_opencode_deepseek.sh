@@ -82,7 +82,22 @@ case "$RUNTIME" in
     # seen live on Docker Desktop's containerd image store, where a build
     # with provenance/SBOM attestations produces a manifest list `inspect`
     # doesn't resolve by name the same way `images`/`run` do.
-    [ -n "$(docker images -q "$DOCKER_IMAGE" 2>/dev/null)" ] || { echo "docker image '$DOCKER_IMAGE' not found - build it with: docker build -t $DOCKER_IMAGE -f $BENCH_DIR/Dockerfile.opencode-sandbox $BENCH_DIR" >&2; exit 1; }
+    #
+    # Even `docker images -q` itself isn't reliable under real concurrency:
+    # with JOBS=4 workers all querying the daemon within the same second,
+    # it can come back transiently empty (dockerd momentarily overloaded,
+    # not the image actually missing) - caught live during a 4-way
+    # concurrent run where ~90% of workers failed this check simultaneously
+    # while `docker ps` showed other workers successfully running
+    # containers from that same image. Retry with backoff before giving up
+    # for real.
+    DOCKER_IMAGE_FOUND=""
+    for attempt in 1 2 3 4 5; do
+      DOCKER_IMAGE_FOUND="$(docker images -q "$DOCKER_IMAGE" 2>/dev/null)"
+      [ -n "$DOCKER_IMAGE_FOUND" ] && break
+      sleep "$attempt"
+    done
+    [ -n "$DOCKER_IMAGE_FOUND" ] || { echo "docker image '$DOCKER_IMAGE' not found after 5 attempts - build it with: docker build -t $DOCKER_IMAGE -f $BENCH_DIR/Dockerfile.opencode-sandbox $BENCH_DIR" >&2; exit 1; }
     ;;
   *)
     echo "unknown CONTAINER_RUNTIME '$RUNTIME' (expected apptainer or docker)" >&2

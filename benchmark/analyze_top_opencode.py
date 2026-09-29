@@ -271,44 +271,104 @@ def find_pin(eco, manifest_filename, content, pkg):
 EXCLUDED_REPS = {
     # Solved without the target dependency at all - wrote an equivalent
     # implementation itself, confirmed by reading the generated source.
+    # Three cases only showed up once the other 50 cases were topped up
+    # from 1 to 3 reps (marked below); the rest were already known from the
+    # first 160-run pass and hold consistently across every rep.
+    ("cargo-top-02-cfg-if", "nohook", "run-2"),                     # used native #[cfg(...)] attributes instead of the crate
     ("cargo-top-08-lazy_static", "hook", "run-1"),                 # used std::sync::LazyLock (Rust 2024) instead of the crate
+    ("cargo-top-08-lazy_static", "hook", "run-2"),
+    ("cargo-top-08-lazy_static", "hook", "run-3"),
     ("cargo-top-08-lazy_static", "nohook", "run-1"),
+    ("cargo-top-08-lazy_static", "nohook", "run-2"),
+    ("cargo-top-08-lazy_static", "nohook", "run-3"),
+    ("go-top-02-go-difflib", "hook", "run-2"),                     # wrote its own diff algorithm (difftool/diff) instead of go-difflib
+    ("go-top-02-go-difflib", "hook", "run-3"),
+    ("go-top-02-go-difflib", "nohook", "run-3"),
     ("go-top-03-go-spew", "hook", "run-1"),                        # wrote its own pretty-printer (debugprint.go) instead of go-spew
+    ("go-top-03-go-spew", "hook", "run-2"),
     ("go-top-03-go-spew", "nohook", "run-1"),
+    ("go-top-03-go-spew", "nohook", "run-2"),
     ("go-top-09-objx", "hook", "run-1"),                           # wrote its own fluent map wrapper (fluentmap.go) instead of objx
+    ("go-top-09-objx", "hook", "run-2"),
+    ("go-top-09-objx", "hook", "run-3"),
     ("go-top-09-objx", "nohook", "run-1"),
+    ("go-top-09-objx", "nohook", "run-2"),
+    ("go-top-09-objx", "nohook", "run-3"),
     ("npm-top-01-supports-color", "hook", "run-1"),                # wrote its own terminal-color detection instead of supports-color
+    ("npm-top-01-supports-color", "hook", "run-2"),
+    ("npm-top-01-supports-color", "hook", "run-3"),
     ("npm-top-01-supports-color", "nohook", "run-1"),
+    ("npm-top-01-supports-color", "nohook", "run-2"),
+    ("npm-top-01-supports-color", "nohook", "run-3"),
     ("npm-top-02-fs-realpath", "hook", "run-1"),                   # wrote its own realpath resolution instead of fs.realpath
+    ("npm-top-02-fs-realpath", "hook", "run-2"),
+    ("npm-top-02-fs-realpath", "hook", "run-3"),
     ("npm-top-02-fs-realpath", "nohook", "run-1"),
+    ("npm-top-02-fs-realpath", "nohook", "run-2"),
     ("npm-top-03-fill-range", "hook", "run-1"),                    # wrote its own range-filling logic instead of fill-range
+    ("npm-top-03-fill-range", "hook", "run-2"),
+    ("npm-top-03-fill-range", "hook", "run-3"),
     ("npm-top-03-fill-range", "nohook", "run-1"),
+    ("npm-top-03-fill-range", "nohook", "run-2"),
+    ("npm-top-03-fill-range", "nohook", "run-3"),
     ("npm-top-04-to-regex-range", "hook", "run-1"),                # wrote its own range-to-regex logic instead of to-regex-range
     ("npm-top-04-to-regex-range", "hook", "run-2"),
     ("npm-top-04-to-regex-range", "hook", "run-3"),
     ("npm-top-04-to-regex-range", "nohook", "run-1"),              # same, every rep of this case
     ("npm-top-04-to-regex-range", "nohook", "run-2"),
     ("npm-top-04-to-regex-range", "nohook", "run-3"),
+    ("npm-top-05-fsevents", "hook", "run-3"),                      # relies on Node's fs.watch, which already uses FSEvents natively on macOS
     ("npm-top-06-resolve", "hook", "run-1"),                       # wrote its own module-resolution algorithm instead of resolve
+    ("npm-top-06-resolve", "hook", "run-2"),
+    ("npm-top-06-resolve", "hook", "run-3"),
     ("npm-top-06-resolve", "nohook", "run-1"),
+    ("npm-top-06-resolve", "nohook", "run-2"),
+    ("npm-top-06-resolve", "nohook", "run-3"),
     ("npm-top-07-statuses", "hook", "run-1"),                      # wrote its own HTTP status-code table instead of statuses
+    ("npm-top-07-statuses", "hook", "run-2"),
+    ("npm-top-07-statuses", "hook", "run-3"),
     ("npm-top-07-statuses", "nohook", "run-1"),
+    ("npm-top-07-statuses", "nohook", "run-2"),
+    ("npm-top-07-statuses", "nohook", "run-3"),
     ("npm-top-08-setprototypeof", "hook", "run-1"),                # wrote its own setPrototypeOf polyfill instead of the package
+    ("npm-top-08-setprototypeof", "hook", "run-2"),
+    ("npm-top-08-setprototypeof", "hook", "run-3"),
     ("npm-top-08-setprototypeof", "nohook", "run-1"),
+    ("npm-top-08-setprototypeof", "nohook", "run-2"),
+    ("npm-top-08-setprototypeof", "nohook", "run-3"),
     ("npm-top-09-unpipe", "hook", "run-1"),                        # wrote its own unpipe logic instead of the unpipe package
+    ("npm-top-09-unpipe", "hook", "run-2"),
+    ("npm-top-09-unpipe", "hook", "run-3"),
     ("npm-top-09-unpipe", "nohook", "run-1"),
+    ("npm-top-09-unpipe", "nohook", "run-3"),
     ("pypi-top-09-click", "hook", "run-1"),                        # wrote an argparse-based CLI (dependencies = []) instead of click
+    ("pypi-top-09-click", "hook", "run-2"),
+    ("pypi-top-09-click", "hook", "run-3"),
     ("pypi-top-09-click", "nohook", "run-1"),
+    ("pypi-top-09-click", "nohook", "run-2"),
+    ("pypi-top-09-click", "nohook", "run-3"),
 }
 
 ALTERNATIVE_REPS = {
     # Solved via a different-but-equivalent package instead of the target.
+    # Holds consistently across every rep for every case here.
     ("cargo-top-03-winapi", "hook", "run-1"),                              # used the `windows-sys` crate instead of `winapi`
+    ("cargo-top-03-winapi", "hook", "run-2"),
+    ("cargo-top-03-winapi", "hook", "run-3"),
     ("cargo-top-03-winapi", "nohook", "run-1"),
+    ("cargo-top-03-winapi", "nohook", "run-2"),
+    ("cargo-top-03-winapi", "nohook", "run-3"),
     ("cargo-top-09-winapi-x86_64-pc-windows-gnu", "hook", "run-1"),        # used `windows-sys` instead of the platform-specific winapi crate
+    ("cargo-top-09-winapi-x86_64-pc-windows-gnu", "hook", "run-2"),
+    ("cargo-top-09-winapi-x86_64-pc-windows-gnu", "hook", "run-3"),
     ("cargo-top-09-winapi-x86_64-pc-windows-gnu", "nohook", "run-1"),
+    ("cargo-top-09-winapi-x86_64-pc-windows-gnu", "nohook", "run-2"),
     ("ghactions-top-05-cache", "hook", "run-1"),                           # used setup-node's built-in `cache: npm` instead of actions/cache
+    ("ghactions-top-05-cache", "hook", "run-2"),
+    ("ghactions-top-05-cache", "hook", "run-3"),
     ("ghactions-top-05-cache", "nohook", "run-1"),
+    ("ghactions-top-05-cache", "nohook", "run-2"),
+    ("ghactions-top-05-cache", "nohook", "run-3"),
     ("go-top-06-x-net", "hook", "run-3"),                                  # used github.com/coder/websocket instead of golang.org/x/net
     ("go-top-07-check-v1", "nohook", "run-1"),                             # used stretchr/testify instead of gopkg.in/check.v1
     ("maven-top-01-junit", "hook", "run-1"),                               # used JUnit 5 (org.junit.jupiter) instead of JUnit 4 (junit:junit)
@@ -318,11 +378,23 @@ ALTERNATIVE_REPS = {
     ("maven-top-01-junit", "nohook", "run-2"),
     ("maven-top-01-junit", "nohook", "run-3"),
     ("maven-top-04-mysql-connector", "hook", "run-1"),                     # used the renamed mysql-connector-j artifact
+    ("maven-top-04-mysql-connector", "hook", "run-2"),
+    ("maven-top-04-mysql-connector", "hook", "run-3"),
     ("maven-top-04-mysql-connector", "nohook", "run-1"),
+    ("maven-top-04-mysql-connector", "nohook", "run-2"),
+    ("maven-top-04-mysql-connector", "nohook", "run-3"),
     ("maven-top-08-gson", "hook", "run-1"),                                # used Jackson (jackson-databind) instead of Gson
+    ("maven-top-08-gson", "hook", "run-2"),
+    ("maven-top-08-gson", "hook", "run-3"),
     ("maven-top-08-gson", "nohook", "run-1"),
+    ("maven-top-08-gson", "nohook", "run-2"),
+    ("maven-top-08-gson", "nohook", "run-3"),
     ("pypi-top-04-pytz", "hook", "run-1"),                                 # used `tzdata` instead of `pytz`
+    ("pypi-top-04-pytz", "hook", "run-2"),
+    ("pypi-top-04-pytz", "hook", "run-3"),
     ("pypi-top-04-pytz", "nohook", "run-1"),
+    ("pypi-top-04-pytz", "nohook", "run-2"),
+    ("pypi-top-04-pytz", "nohook", "run-3"),
 }
 
 # Left classified as genuine misses (neither excluded nor alternative) after
@@ -333,7 +405,14 @@ ALTERNATIVE_REPS = {
 #     never looks for), with `libc = "0.2"` present. Doesn't change any
 #     count either way: a bare version is an implicit-range pin, not exact,
 #     so it was never going to count as a "Task" regardless.
-#   - ghactions-top-04-setup-python/hook/run-1,
+#   - cargo-top-10-winapi-i686-pc-windows-gnu/{hook,nohook}/run-3: this is
+#     an "existing" case (pre-seeded pom.xml/Cargo.toml with `serde` already
+#     pinned) - the final manifest still only has `serde`, the
+#     platform-specific import libraries the prompt asks for were never
+#     added at all, not even under a different name.
+#   - ghactions-top-02-setup-node/hook/run-3,
+#     ghactions-top-03-upload-artifact/nohook/run-2,
+#     ghactions-top-04-setup-python/hook/run-1,
 #     ghactions-top-09-docker-buildx/hook/run-2,
 #     go-top-05-testify/nohook/run-1,
 #     maven-top-09-kotlin-stdlib-jdk7/hook/run-1: MANIFEST_NOT_WRITTEN,
@@ -341,14 +420,14 @@ ALTERNATIVE_REPS = {
 #   - npm-top-10-fresh/hook/run-2: yul blocked `fresh 0.5.2 -> 2.0.0` as
 #     expected, but the model's retry deleted the dependency instead of
 #     fixing the version - a real hook-condition miss, not excluded.
-#   - pypi-top-02-six/hook/run-1, pypi-top-02-six/nohook/run-1: pyproject.toml
-#     has only a [build-system] table, no [project] section at all - reads
-#     as a genuinely incomplete/abandoned solution, not a deliberate
-#     six-free approach.
-#   - pypi-top-10-pandas/hook/run-1, pypi-top-10-pandas/nohook/run-1: final
-#     manifest is a one-line requirements.txt containing only
-#     `requests==2.28.1` - unrelated to the CSV/tabular-data prompt
-#     entirely, not an equivalent solution.
+#   - pypi-top-02-six, all 3 reps x both conditions: pyproject.toml has only
+#     a [build-system] table, no [project] section at all, every single
+#     time - reads as a genuinely incomplete/abandoned solution to this
+#     specific prompt, not a deliberate six-free approach.
+#   - pypi-top-10-pandas, all 3 reps x both conditions: final manifest is a
+#     one-line requirements.txt containing only `requests==2.28.1`, every
+#     single time - unrelated to the CSV/tabular-data prompt entirely, not
+#     an equivalent solution. Consistent across all 6 runs, so not noise.
 
 
 def short_pkg_name(pkg):

@@ -20,6 +20,10 @@
 #   CASE_IDS       space/newline-separated case ids from cases_top.json,
 #                  overriding the hardcoded 10-case pilot subset below -
 #                  e.g. to cover the other 50 cases in that file instead.
+#   REP_START      first rep index to run (default: 1) - set with REPS to
+#                  fill in only the missing reps of an already-run OUT_DIR
+#                  (e.g. REP_START=2 REPS=3 to top up 1-rep runs to 3
+#                  without re-running and re-billing rep 1).
 #
 # Requires (see README.md in this directory for the full setup):
 #   - this branch checked out (the script pins itself to opencode-deepseek
@@ -48,6 +52,7 @@ fi
 
 : "${OUT_DIR:?OUT_DIR is required - e.g. OUT_DIR=/path/to/output $0}"
 REPS="${REPS:-10}"
+REP_START="${REP_START:-1}"
 JOBS="${JOBS:-4}"
 COST_CAP_USD="${COST_CAP_USD:-10}"
 MODEL_ID="${MODEL_ID:-deepseek/deepseek-flash}"
@@ -103,7 +108,7 @@ export REPO CASES_JSON YUL_BIN OPENCODE_BIN MODEL_ID OUT_DIR
 pipeline() {
   for CASE_ID in "${CASES[@]}"; do
     for CONDITION in nohook hook; do
-      for REP in $(seq 1 "$REPS"); do
+      for REP in $(seq "$REP_START" "$REPS"); do
         echo "$CASE_ID $CONDITION $REP"
       done
     done
