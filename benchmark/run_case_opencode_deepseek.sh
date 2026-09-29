@@ -248,8 +248,16 @@ SHARED_CACHE="$OUT_DIR/.container-shared-cache"
 mkdir -p "$SHARED_CACHE/yul" "$SHARED_CACHE/opencode-pkg"
 CONTAINER_HOME=$(mktemp -d)
 mkdir -p "$CONTAINER_HOME/.local/share/opencode"
+# Only the "deepseek" entry, not the whole auth.json - the host's real
+# store holds every provider configured on this machine (github-copilot,
+# openrouter, google, ...), and this run only ever needs one of them. The
+# leak that prompted the nohook auth-guard fix above put all of them into
+# a committed transcript at once precisely because the full file was
+# sitting there to read; this way there's nothing beyond the one key this
+# run actually uses, even if some future exfiltration path gets past the
+# guard.
 if [ -f "$HOME/.local/share/opencode/auth.json" ]; then
-  cp "$HOME/.local/share/opencode/auth.json" "$CONTAINER_HOME/.local/share/opencode/auth.json"
+  jq -c '{deepseek: .deepseek}' "$HOME/.local/share/opencode/auth.json" > "$CONTAINER_HOME/.local/share/opencode/auth.json"
 fi
 
 # --thinking makes OpenCode's --format json stream emit {"type":"reasoning",
