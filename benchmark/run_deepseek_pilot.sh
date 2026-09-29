@@ -17,6 +17,9 @@
 #   MODEL_ID       opencode model spec (default: deepseek/deepseek-flash -
 #                  `opencode models deepseek` is the source of truth, this
 #                  catalog has been renamed before)
+#   CASE_IDS       space/newline-separated case ids from cases_top.json,
+#                  overriding the hardcoded 10-case pilot subset below -
+#                  e.g. to cover the other 50 cases in that file instead.
 #
 # Requires (see README.md in this directory for the full setup):
 #   - this branch checked out (the script pins itself to opencode-deepseek
@@ -57,18 +60,22 @@ export OUT_DIR MODEL_ID
 command -v "$OPENCODE_BIN" >/dev/null 2>&1 || { echo "opencode not found (set OPENCODE_BIN or put it on PATH)" >&2; exit 1; }
 [ -x "$YUL_BIN" ] || { echo "$YUL_BIN not built - run: go build -o yul . at the repo root" >&2; exit 1; }
 
-CASES=(
-  pypi-top-01-requests
-  pypi-top-05-urllib3
-  maven-top-01-junit
-  maven-top-06-spring-data-jpa
-  npm-top-04-to-regex-range
-  npm-top-10-fresh
-  go-top-06-x-net
-  cargo-top-01-libc
-  ghactions-top-01-checkout
-  ghactions-top-09-docker-buildx
-)
+if [ -n "${CASE_IDS:-}" ]; then
+  read -ra CASES <<< "$CASE_IDS"
+else
+  CASES=(
+    pypi-top-01-requests
+    pypi-top-05-urllib3
+    maven-top-01-junit
+    maven-top-06-spring-data-jpa
+    npm-top-04-to-regex-range
+    npm-top-10-fresh
+    go-top-06-x-net
+    cargo-top-01-libc
+    ghactions-top-01-checkout
+    ghactions-top-09-docker-buildx
+  )
+fi
 
 mkdir -p "$OUT_DIR"
 LOG="$OUT_DIR/progress.log"
