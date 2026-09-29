@@ -165,16 +165,19 @@ else
 EOF
 fi
 
-if [ "$CONDITION" = "hook" ]; then
-  # opencode-yul (above) is now the published npm package, v0.0.17 - it
-  # covers Write, Edit, and Bash natively (PR #60), with the narrower
-  # write-target-aware bash regex (PR #65) - so this local plugin no longer
-  # needs to duplicate any of that. All it still adds is the auth-store-read
-  # block, which isn't upstream anywhere yet: the run's DeepSeek API key
-  # lives in OpenCode's own credential store (auth login, not an env var -
-  # see the top of this script), so this is the one exfiltration path a
-  # model could still go looking for.
-  cat > "$WORKDIR/.opencode/plugins/yul-auth-guard.js" <<'EOF'
+# Unconditional - NOT gated on CONDITION="hook". opencode-yul (the actual
+# dependency-version plugin, above) only applies in the hook condition by
+# design, since that's what nohook-vs-hook is measuring - but this guard is
+# a sandbox-safety concern, not part of what's being measured, and a model
+# reading the credential store is exactly as bad a nohook run as a hook one.
+# It used to be installed only for CONDITION="hook", which meant nohook runs
+# had zero protection against this - caught live when a nohook run ran
+# `cat .../auth.json` and its real DeepSeek/OpenRouter/GitHub-Copilot/Google
+# credentials landed in that run's committed transcript.jsonl and
+# session_export.json in plaintext, blocked only by GitHub's push protection
+# on the way out. Covers Read as well as Bash: it checks every tool's args
+# for the auth-store path, not just shell commands.
+cat > "$WORKDIR/.opencode/plugins/yul-auth-guard.js" <<'EOF'
 const AUTH_STORE_RE = /\.local[/\\]share[/\\]opencode[/\\]auth\.json|opencode[/\\]auth\.json/i
 
 function mentionsAuthStore(args) {
@@ -194,7 +197,6 @@ export const YulAuthGuardPlugin = async () => {
   }
 }
 EOF
-fi
 
 cd "$WORKDIR"
 
@@ -320,10 +322,20 @@ else
 fi
 
 # Belt-and-suspenders: the yul-auth-guard.js plugin above blocks reads of
-# the auth store, but redact anything DeepSeek-key-shaped that slips through
-# anyway (format is public: "sk-" + 32 hex chars) - this doesn't require
-# knowing the actual configured key, so it still works after rotation.
-sed -i -E 's/sk-[a-f0-9]{32}/***REDACTED-DEEPSEEK-API-KEY***/g' "$TRANSCRIPT_TMP" "$STDERR_TMP"
+# the auth store, but redact anything shaped like a credential that slips
+# through anyway - all four formats are public knowledge, not the actual
+# configured secret, so this still works after rotation. Covers every
+# provider OpenCode's own auth store can hold (github-copilot, openrouter,
+# google, deepseek), not just the one this run's own provider needs - a
+# nohook run's missing auth-guard (fixed above, but keep this net anyway)
+# once let a `cat auth.json` put all four of a live auth.json's credentials
+# into a committed transcript verbatim.
+sed -i -E \
+  -e 's/gho_[A-Za-z0-9]{36}/***REDACTED-GITHUB-OAUTH-TOKEN***/g' \
+  -e 's/sk-or-v1-[a-f0-9]{64}/***REDACTED-OPENROUTER-KEY***/g' \
+  -e 's/AIzaSy[A-Za-z0-9_-]{33}/***REDACTED-GOOGLE-API-KEY***/g' \
+  -e 's/sk-[a-f0-9]{32}/***REDACTED-DEEPSEEK-API-KEY***/g' \
+  "$TRANSCRIPT_TMP" "$STDERR_TMP"
 
 mv "$TRANSCRIPT_TMP" transcript.jsonl
 mv "$STDERR_TMP" stderr.log
@@ -377,7 +389,12 @@ SESSION_EXPORT_TMP=$(mktemp)
 if [ -n "$SESSION_ID" ]; then
   HOME="$CONTAINER_HOME" "$OPENCODE_BIN" export "$SESSION_ID" > "$SESSION_EXPORT_TMP" 2>/dev/null || true
 fi
-sed -i -E 's/sk-[a-f0-9]{32}/***REDACTED-DEEPSEEK-API-KEY***/g' "$SESSION_EXPORT_TMP"
+sed -i -E \
+  -e 's/gho_[A-Za-z0-9]{36}/***REDACTED-GITHUB-OAUTH-TOKEN***/g' \
+  -e 's/sk-or-v1-[a-f0-9]{64}/***REDACTED-OPENROUTER-KEY***/g' \
+  -e 's/AIzaSy[A-Za-z0-9_-]{33}/***REDACTED-GOOGLE-API-KEY***/g' \
+  -e 's/sk-[a-f0-9]{32}/***REDACTED-DEEPSEEK-API-KEY***/g' \
+  "$SESSION_EXPORT_TMP"
 mv "$SESSION_EXPORT_TMP" session_export.json
 
 # Go's module cache (under $CONTAINER_HOME/go/pkg/mod for a go.mod case)
