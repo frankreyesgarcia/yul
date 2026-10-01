@@ -395,39 +395,76 @@ ALTERNATIVE_REPS = {
     ("pypi-top-04-pytz", "nohook", "run-1"),
     ("pypi-top-04-pytz", "nohook", "run-2"),
     ("pypi-top-04-pytz", "nohook", "run-3"),
+    ("cargo-top-01-libc", "nohook", "run-2"),                              # not a real alternative - see comment below
+    ("cargo-top-10-winapi-i686-pc-windows-gnu", "hook", "run-3"),          # used `windows_i686_gnu` instead of the platform-specific winapi crate
 }
 
-# Left classified as genuine misses (neither excluded nor alternative) after
-# the same manual pass, for the record:
-#   - cargo-top-01-libc/nohook/run-2: harness detection gap, not a model
-#     miss - the manifest is really at systool/Cargo.toml (a candidate path
+# A second manual pass, prompted by a review question: does "Tasks" only
+# count reps where the model actually attempted to write the target
+# dependency (blocked or not), rather than every rep minus self-implemented
+# ones? Re-read every rep whose final manifest showed pin_kind=="none" with
+# that question specifically - not just the final file, but every write/edit
+# in the transcript, since a model can write something and remove it again
+# later in the same session. Two corrections came out of it, both folded
+# into ALTERNATIVE_REPS above rather than a new bucket, since the mechanism
+# (force is_latest=True) is the same either way:
+#   - cargo-top-01-libc/nohook/run-2: not actually a self-implementation or
+#     equivalent-package case - a harness detection gap. The manifest is
+#     really at systool/Cargo.toml (a candidate path
 #     run_case_opencode_deepseek.sh's single-string case.manifest field
-#     never looks for), with `libc = "0.2"` present. Doesn't change any
-#     count either way: a bare version is an implicit-range pin, not exact,
-#     so it was never going to count as a "Task" regardless.
-#   - cargo-top-10-winapi-i686-pc-windows-gnu/{hook,nohook}/run-3: this is
-#     an "existing" case (pre-seeded pom.xml/Cargo.toml with `serde` already
-#     pinned) - the final manifest still only has `serde`, the
-#     platform-specific import libraries the prompt asks for were never
-#     added at all, not even under a different name.
+#     never looks for), with `libc = "0.2"` genuinely present.
+#   - cargo-top-10-winapi-i686-pc-windows-gnu/hook/run-3: the transcript
+#     shows a real write adding `windows_i686_gnu = "0.53"` under
+#     [target.i686-pc-windows-gnu.dependencies] - missed by the pin-finder
+#     because it's a different crate name, same as the other winapi cases'
+#     windows-sys substitution.
+#
+# Important scope correction from that same re-read: a dependency written
+# to a file yul doesn't watch (setup.py, setup.cfg, requirements-dev.txt -
+# none of them in CLAUDE.md's supported-manifest list) is invisible to
+# yul's hook by construction, so it was never a candidate for RQ1/RQ2
+# regardless of whether the model "attempted" it. pypi-top-02-six's six
+# ended up in exactly those unwatched files in 4 of its 6 reps (real writes,
+# just not to a file that matters here) - counted below as never attempted
+# on the manifest that counts, not reclassified as real attempts.
+#
+# NEVER_ATTEMPTED_REPS (below) covers what that re-read actually confirmed
+# as zero real attempt anywhere near a watched manifest - kept in this
+# script's own exclusion mechanism, separate from EXCLUDED_REPS, since the
+# reason is different (nothing to compare, not "compared and found
+# equivalent"):
+NEVER_ATTEMPTED_REPS = {
+    ("cargo-top-10-winapi-i686-pc-windows-gnu", "nohook", "run-3"),  # Cargo.toml only has the pre-seeded serde, nothing platform-specific added at all
+    ("ghactions-top-03-upload-artifact", "nohook", "run-2"),          # zero Write/Edit calls in the transcript
+    ("go-top-05-testify", "nohook", "run-1"),                        # zero Write/Edit calls in the transcript
+    ("pypi-top-02-six", "hook", "run-1"),      # six written, but only to setup.py/requirements-dev.txt - not a manifest yul watches
+    ("pypi-top-02-six", "hook", "run-2"),      # zero dependency-shaped mention of six anywhere
+    ("pypi-top-02-six", "hook", "run-3"),      # zero dependency-shaped mention of six anywhere
+    ("pypi-top-02-six", "nohook", "run-1"),    # six written, but only to setup.py/setup.cfg/requirements-dev.txt
+    ("pypi-top-02-six", "nohook", "run-2"),    # six written, but only inside setup.py's extras_require
+    ("pypi-top-02-six", "nohook", "run-3"),    # six written, but only to setup.py
+    ("pypi-top-10-pandas", "hook", "run-1"),   # zero dependency-shaped mention of pandas anywhere
+    ("pypi-top-10-pandas", "hook", "run-2"),
+    ("pypi-top-10-pandas", "hook", "run-3"),
+    ("pypi-top-10-pandas", "nohook", "run-1"),
+    ("pypi-top-10-pandas", "nohook", "run-2"), # pandas>=1.0 appears once under [project.optional-dependencies] in an intermediate write, not the main [project.dependencies] yul's resolver reads - kept conservative pending a closer look at whether yul's pyproject.toml checker parses optional-dependencies at all
+    ("pypi-top-10-pandas", "nohook", "run-3"),
+}
+
+# Left classified as genuine misses (neither excluded, alternative, nor
+# never-attempted) after both manual passes - a real attempt on the manifest
+# that matters, which still isn't satisfied at the end:
 #   - ghactions-top-02-setup-node/hook/run-3,
-#     ghactions-top-03-upload-artifact/nohook/run-2,
 #     ghactions-top-04-setup-python/hook/run-1,
 #     ghactions-top-09-docker-buildx/hook/run-2,
-#     go-top-05-testify/nohook/run-1,
-#     maven-top-09-kotlin-stdlib-jdk7/hook/run-1: MANIFEST_NOT_WRITTEN,
-#     genuine completion failures.
+#     maven-top-09-kotlin-stdlib-jdk7/hook/run-1: yul's hook fired for real
+#     (confirmed via "outdated dependencies" in the transcript) but the run
+#     never went on to produce a final manifest at all -
+#     MANIFEST_NOT_WRITTEN, a real hook-condition miss, not "never
+#     attempted."
 #   - npm-top-10-fresh/hook/run-2: yul blocked `fresh 0.5.2 -> 2.0.0` as
 #     expected, but the model's retry deleted the dependency instead of
 #     fixing the version - a real hook-condition miss, not excluded.
-#   - pypi-top-02-six, all 3 reps x both conditions: pyproject.toml has only
-#     a [build-system] table, no [project] section at all, every single
-#     time - reads as a genuinely incomplete/abandoned solution to this
-#     specific prompt, not a deliberate six-free approach.
-#   - pypi-top-10-pandas, all 3 reps x both conditions: final manifest is a
-#     one-line requirements.txt containing only `requests==2.28.1`, every
-#     single time - unrelated to the CSV/tabular-data prompt entirely, not
-#     an equivalent solution. Consistent across all 6 runs, so not noise.
 
 
 def short_pkg_name(pkg):
@@ -595,7 +632,7 @@ def main():
                     is_latest = not any(k == pkg or k == short or k.endswith("/" + short) for k in outdated)
 
                 rep_key = (cid, condition, rep_dir.name)
-                if rep_key in EXCLUDED_REPS:
+                if rep_key in EXCLUDED_REPS or rep_key in NEVER_ATTEMPTED_REPS:
                     continue
 
                 mitigated_pkg, used_tool = analyze_transcript(rep_dir / "transcript.jsonl", pkg)
