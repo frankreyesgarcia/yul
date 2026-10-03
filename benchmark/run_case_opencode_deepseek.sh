@@ -33,8 +33,8 @@
 #                 runs of the same case/condition.
 #
 # Env vars:
-#   YUL_BIN            path to the yul binary the hook condition execs
-#                       (default: "yul" on PATH; build one with `go build -o yul .`)
+#   OPENCODE_YUL_VERSION  opencode-yul npm version the hook condition loads
+#                       (default: 0.0.21)
 #   OPENCODE_BIN        path to the opencode binary (default: "opencode" on PATH)
 #   CONTAINER_RUNTIME   "apptainer" or "docker" - forces which one to use
 #                       instead of auto-detecting (apptainer preferred when
@@ -48,12 +48,8 @@ OUT_DIR="$4"
 MODEL_ID="${5:-deepseek/deepseek-flash}"
 REPEAT_INDEX="${6:-}"
 
-YUL_BIN="${YUL_BIN:-yul}"
 OPENCODE_BIN="${OPENCODE_BIN:-opencode}"
 command -v "$OPENCODE_BIN" >/dev/null 2>&1 || { echo "opencode not found (set OPENCODE_BIN or put it on PATH)" >&2; exit 1; }
-if [ "$CONDITION" = "hook" ]; then
-  command -v "$YUL_BIN" >/dev/null 2>&1 || { echo "yul not found (set YUL_BIN or put it on PATH)" >&2; exit 1; }
-fi
 
 BENCH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUNTIME="${CONTAINER_RUNTIME:-}"
@@ -149,12 +145,14 @@ fi
 # an env var. write/edit checking is the published "opencode-yul" npm
 # package (chains-project/yul's own opencode-yul/ subdirectory) instead of
 # a hand-rolled copy - it downloads and caches its own pinned yul release
-# binary (currently v0.0.14), independent of $YUL_BIN below.
+# binary into the run's own $HOME. Pinned (override with
+# OPENCODE_YUL_VERSION) so a batch can't drift onto a newer npm release
+# mid-run - an unpinned "opencode-yul" resolves @latest on first use.
 if [ "$CONDITION" = "hook" ]; then
   cat > "$WORKDIR/opencode.json" <<EOF
 {
   "\$schema": "https://opencode.ai/config.json",
-  "plugin": ["opencode-yul"]
+  "plugin": ["opencode-yul@${OPENCODE_YUL_VERSION:-0.0.21}"]
 }
 EOF
 else
@@ -237,15 +235,16 @@ STDERR_TMP=$(mktemp)
 # below (read-only) since it doesn't reintroduce any of the /proj exposure
 # the two flags above are closing.
 #
-# Cache dirs: yul's release binary and the opencode-yul plugin package are
-# shared read-write across all containers (safe to race on - worst case is
-# a redundant re-download, no per-run data in either). Everything under
-# .local/share/opencode (sessions, snapshots, its own log) is NOT shared -
-# each run gets a throwaway one, with only auth.json bind-mounted in
-# read-only from the real one, so the container can authenticate without
-# ever seeing another run's session state or writing into the real one.
-SHARED_CACHE="$OUT_DIR/.container-shared-cache"
-mkdir -p "$SHARED_CACHE/yul" "$SHARED_CACHE/opencode-pkg"
+# Nothing is shared between runs: each one gets a throwaway $HOME, so the
+# opencode-yul package, its yul binary, every package manager's cache and
+# OpenCode's own session data all start empty and die with the run. There
+# used to be a shared read-write cache for the plugin and yul binary, but
+# it was mounted into nohook runs too (a control run could `ls ~/.cache`
+# and find yul), and the first run's plugin version stuck for the whole
+# batch. Same for the host's yul binary, once bind-mounted at
+# /usr/local/bin/yul with YUL_BIN set: nothing inside ever execed it
+# (opencode-yul downloads its own), but it put yul on a nohook run's PATH.
+# Only the "deepseek" credential is copied in (below).
 CONTAINER_HOME=$(mktemp -d)
 mkdir -p "$CONTAINER_HOME/.local/share/opencode"
 # Only the "deepseek" entry, not the whole auth.json - the host's real
@@ -273,11 +272,8 @@ if [ "$RUNTIME" = "apptainer" ]; then
     --home "$CONTAINER_HOME:/home/sandbox" \
     --bind "$WORKDIR:/work" \
     --bind /etc/resolv.conf:/etc/resolv.conf:ro \
-    --bind "$SHARED_CACHE/yul:/home/sandbox/.cache/yul" \
-    --bind "$SHARED_CACHE/opencode-pkg:/home/sandbox/.cache/opencode" \
     --bind "$(command -v "$OPENCODE_BIN"):/usr/local/bin/opencode:ro" \
-    --bind "$(command -v "$YUL_BIN"):/usr/local/bin/yul:ro" \
-    --env YUL_BIN=/usr/local/bin/yul \
+    --env GITHUB_TOKEN="${GITHUB_TOKEN:-}" \
     --pwd /work \
     "$SIF_IMAGE" \
     opencode run "$PROMPT" \
@@ -307,18 +303,13 @@ else
   # the Dockerfile.opencode-sandbox comment: it's baked into the image at
   # build time instead, since bind-mounting the host's own binary fails
   # with "exec format error" whenever the host isn't Linux/same-arch as
-  # the image (verified live on macOS). $YUL_BIN is still bound in, but
-  # nothing inside the container execs it (see the comment above the
-  # apptainer bind for the same path), so it's harmless either way.
+  # the image (verified live on macOS).
   docker run --rm \
     --user "$(id -u):$(id -g)" \
     -e HOME=/home/sandbox \
-    -e YUL_BIN=/usr/local/bin/yul \
+    -e GITHUB_TOKEN \
     -v "$CONTAINER_HOME:/home/sandbox" \
     -v "$WORKDIR:/work" \
-    -v "$SHARED_CACHE/yul:/home/sandbox/.cache/yul" \
-    -v "$SHARED_CACHE/opencode-pkg:/home/sandbox/.cache/opencode" \
-    -v "$(command -v "$YUL_BIN"):/usr/local/bin/yul:ro" \
     -w /work \
     "$DOCKER_IMAGE" \
     opencode run "$PROMPT" \

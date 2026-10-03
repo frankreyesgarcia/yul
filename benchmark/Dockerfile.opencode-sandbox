@@ -17,21 +17,33 @@
 # a newer opencode release (the tradeoff apptainer avoids), but it's the
 # only way this actually runs on an arbitrary Docker host.
 #
-# `yul` is still bind-mounted at run time (see run_case_opencode_deepseek.sh)
-# even on the docker path - harmless even if it's cross-arch, since nothing
-# inside the container ever execs it directly (the opencode-yul plugin
-# downloads its own pinned release binary instead, see the comment above
-# that bind in run_case_opencode_deepseek.sh).
-FROM debian:bookworm-slim
+# `yul` is neither baked in nor bind-mounted: in hook runs the opencode-yul
+# plugin downloads its own pinned release binary into the run's throwaway
+# $HOME, and nohook runs never see it (see run_case_opencode_deepseek.sh).
+#
+# Toolchains mirror benchmark/Dockerfile (the Claude Code benchmark image),
+# so DeepSeek runs see the same environment Claude runs do: every
+# benchmarked ecosystem's toolchain, so agents can query registries and
+# generate lockfiles as on a dev machine. Containers run as the host uid
+# with a throwaway per-run HOME, so per-user caches (~/go, ~/.m2, uv, pip)
+# never outlive a run; writes under CARGO_HOME land in the --rm container's
+# own layer and are discarded with it.
+FROM node:22-trixie
 
-RUN apt-get update && \
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        ca-certificates curl git jq \
-        nodejs npm \
-        python3 python3-pip python3-venv && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+COPY --from=rust:1-trixie /usr/local/rustup /usr/local/rustup
+COPY --from=rust:1-trixie /usr/local/cargo /usr/local/cargo
+COPY --from=golang:1-trixie /usr/local/go /usr/local/go
+COPY --from=maven:3 /opt/java/openjdk /opt/java/openjdk
+COPY --from=maven:3 /usr/share/maven /usr/share/maven
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+ENV RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo JAVA_HOME=/opt/java/openjdk \
+    PATH=/usr/local/cargo/bin:/usr/local/go/bin:/opt/java/openjdk/bin:/usr/share/maven/bin:$PATH
+RUN chmod a+w /usr/local/cargo /usr/local/rustup && rustup component add clippy rustfmt \
+    && apt-get update && apt-get install -y --no-install-recommends jq python3-pip python3-venv python-is-python3 gh \
+    && rm -rf /var/lib/apt/lists/*
 
-RUN curl -fsSL https://opencode.ai/install | bash && \
+# Pinned so a dataset is reproducible; bump deliberately and record it.
+ARG OPENCODE_VERSION=1.18.34
+RUN curl -fsSL https://opencode.ai/install | bash -s -- --version "$OPENCODE_VERSION" && \
     mv "$HOME/.opencode/bin/opencode" /usr/local/bin/opencode && \
     chmod 755 /usr/local/bin/opencode
