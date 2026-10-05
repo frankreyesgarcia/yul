@@ -329,12 +329,24 @@ fi
 # nohook run's missing auth-guard (fixed above, but keep this net anyway)
 # once let a `cat auth.json` put all four of a live auth.json's credentials
 # into a committed transcript verbatim.
-sed -i -E \
-  -e 's/gho_[A-Za-z0-9]{36}/***REDACTED-GITHUB-OAUTH-TOKEN***/g' \
-  -e 's/sk-or-v1-[a-f0-9]{64}/***REDACTED-OPENROUTER-KEY***/g' \
-  -e 's/AIzaSy[A-Za-z0-9_-]{33}/***REDACTED-GOOGLE-API-KEY***/g' \
-  -e 's/sk-[a-f0-9]{32}/***REDACTED-DEEPSEEK-API-KEY***/g' \
-  "$TRANSCRIPT_TMP" "$STDERR_TMP"
+#
+# perl, not `sed -i -E`: BSD sed (macOS) takes the argument after -i as the
+# backup suffix, so `-i -E` swallowed -E, ran the patterns as basic regexes
+# where {36} is literal, matched nothing, and left a "<file>-E" backup.
+# Caught when GITHUB_TOKEN (dumped by a run's own `env`) turned up verbatim
+# in three runs' transcripts. The live $GITHUB_TOKEN value is redacted
+# literally too, whatever its format.
+redact_credentials() {
+  perl -pi -e '
+    BEGIN { $t = $ENV{GITHUB_TOKEN} // "" }
+    s/\Q$t\E/***REDACTED-GITHUB-TOKEN***/g if length $t;
+    s/(?:gh[opsu]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{50,})/***REDACTED-GITHUB-TOKEN***/g;
+    s/sk-or-v1-[a-f0-9]{64}/***REDACTED-OPENROUTER-KEY***/g;
+    s/AIzaSy[A-Za-z0-9_-]{33}/***REDACTED-GOOGLE-API-KEY***/g;
+    s/sk-[a-f0-9]{32}/***REDACTED-DEEPSEEK-API-KEY***/g;
+  ' "$@"
+}
+redact_credentials "$TRANSCRIPT_TMP" "$STDERR_TMP"
 
 mv "$TRANSCRIPT_TMP" transcript.jsonl
 mv "$STDERR_TMP" stderr.log
@@ -388,12 +400,7 @@ SESSION_EXPORT_TMP=$(mktemp)
 if [ -n "$SESSION_ID" ]; then
   HOME="$CONTAINER_HOME" "$OPENCODE_BIN" export "$SESSION_ID" > "$SESSION_EXPORT_TMP" 2>/dev/null || true
 fi
-sed -i -E \
-  -e 's/gho_[A-Za-z0-9]{36}/***REDACTED-GITHUB-OAUTH-TOKEN***/g' \
-  -e 's/sk-or-v1-[a-f0-9]{64}/***REDACTED-OPENROUTER-KEY***/g' \
-  -e 's/AIzaSy[A-Za-z0-9_-]{33}/***REDACTED-GOOGLE-API-KEY***/g' \
-  -e 's/sk-[a-f0-9]{32}/***REDACTED-DEEPSEEK-API-KEY***/g' \
-  "$SESSION_EXPORT_TMP"
+redact_credentials "$SESSION_EXPORT_TMP"
 mv "$SESSION_EXPORT_TMP" session_export.json
 
 # Go's module cache (under $CONTAINER_HOME/go/pkg/mod for a go.mod case)
